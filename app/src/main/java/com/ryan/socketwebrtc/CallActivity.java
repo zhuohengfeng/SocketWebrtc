@@ -500,7 +500,7 @@ public class CallActivity extends Activity {
     class SignalServer extends WebSocketServer {
 
         public SignalServer( int port ) {
-            super( new InetSocketAddress( port ) );
+            super(new InetSocketAddress(port));
         }
 
         @Override
