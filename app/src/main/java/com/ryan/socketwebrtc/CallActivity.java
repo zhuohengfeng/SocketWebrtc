@@ -3,7 +3,6 @@ package com.ryan.socketwebrtc;
 import android.app.Activity;
 import android.content.Context;
 import android.os.Bundle;
-import android.util.Log;
 import android.view.View;
 import android.widget.TextView;
 
@@ -45,19 +44,14 @@ import org.webrtc.VideoTrack;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.security.cert.CertificateException;
-import java.security.cert.X509Certificate;
 import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
 
-import javax.net.ssl.TrustManager;
-import javax.net.ssl.X509TrustManager;
-
 public class CallActivity extends Activity {
 
     /** ---------和信令服务相关----------- */
-    private final String address = "ws://localhost";
+    private final String address = "ws://10.88.1.1";
 
     private final int port = 8887;
 
@@ -66,25 +60,11 @@ public class CallActivity extends Activity {
     private SignalServer mServer;
     private SignalClient mClient;
 
-    public static final String SIG_SERVER_JOINED = "joined";
-    public static final String SIG_SERVER_OTHER_JOINED = "otherjoin";
-    public static final String SIG_SERVER_LEAVED = "leaved";
-    public static final String SIG_SERVER_BYE = "bye";
-    public static final String SIG_SERVER_FULL = "full";
-
-    public static final String SIG_CLIENT_JOIN = "join";
-    public static final String SIG_CLIENT_LEAVE = "leave";
-    public static final String SIG_CLIENT_MESSAGE = "message";
-
-
     /** ---------和webrtc相关----------- */
     // 视频信息
     private static final int VIDEO_RESOLUTION_WIDTH = 1280;
     private static final int VIDEO_RESOLUTION_HEIGHT = 720;
     private static final int VIDEO_FPS = 30;
-
-    // 指示当前状态，应该改成枚举型
-    private String mState = "init";
 
     // 打印log
     private TextView mLogcatView;
@@ -110,12 +90,10 @@ public class CallActivity extends Activity {
     private PeerConnection mPeerConnection;
     private PeerConnectionFactory mPeerConnectionFactory;
 
-
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_call);
-
 
         // 用户打印信息
         mLogcatView = findViewById(R.id.LogcatView);
@@ -158,7 +136,6 @@ public class CallActivity extends Activity {
         AudioSource audioSource = mPeerConnectionFactory.createAudioSource(new MediaConstraints());
         mAudioTrack = mPeerConnectionFactory.createAudioTrack(AUDIO_TRACK_ID, audioSource);
         mAudioTrack.setEnabled(true);
-
 
         /** ---------开始启动信令服务----------- */
         mIsServer = getIntent().getBooleanExtra("server", false);
@@ -246,12 +223,11 @@ public class CallActivity extends Activity {
         });
     }
 
-
     /**
      * 有其他用户连进来，
      */
-    public void doStartCall() {
-        logcatOnUI("Start Call, Wait ...");
+    public void doStartCall(WebSocket conn) {
+        printInfoOnScreen("Start Call, Wait ...");
         if (mPeerConnection == null) {
             mPeerConnection = createPeerConnection();
         }
@@ -268,7 +244,7 @@ public class CallActivity extends Activity {
                 try {
                     message.put("type", "offer");
                     message.put("sdp", sessionDescription.description);
-                    sendMessage(message);
+                    conn.send(message.toString());
                 } catch (JSONException e) {
                     e.printStackTrace();
                 }
@@ -276,15 +252,8 @@ public class CallActivity extends Activity {
         }, mediaConstraints);
     }
 
-    public void doLeave() {
-        logcatOnUI("Leave room, Wait ...");
-        hangup();
-
-        sendMessage(SIG_CLIENT_LEAVE);
-    }
-
     public void doAnswerCall() {
-        logcatOnUI("Answer Call, Wait ...");
+        printInfoOnScreen("Answer Call, Wait ...");
 
         if (mPeerConnection == null) {
             mPeerConnection = createPeerConnection();
@@ -303,7 +272,7 @@ public class CallActivity extends Activity {
                 try {
                     message.put("type", "answer");
                     message.put("sdp", sessionDescription.description);
-                    sendMessage(message);
+                    sendMessage(message.toString());
                 } catch (JSONException e) {
                     e.printStackTrace();
                 }
@@ -312,14 +281,15 @@ public class CallActivity extends Activity {
         updateCallState(false);
     }
 
-    private void hangup() {
-        logcatOnUI("Hangup Call, Wait ...");
+    public void doLeave() {
+        printInfoOnScreen("Leave room, Wait ...");
+        printInfoOnScreen("Hangup Call, Wait ...");
         if (mPeerConnection == null) {
             return;
         }
         mPeerConnection.close();
         mPeerConnection = null;
-        logcatOnUI("Hangup Done.");
+        printInfoOnScreen("Hangup Done.");
         updateCallState(true);
     }
 
@@ -509,9 +479,6 @@ public class CallActivity extends Activity {
         }
     };
 
-
-
-
     private void sendMessage(JSONObject message) {
         if (mIsServer) {
             mServer.broadcast(message.toString());
@@ -530,12 +497,6 @@ public class CallActivity extends Activity {
         }
     }
 
-
-
-
-
-
-
     class SignalServer extends WebSocketServer {
 
         public SignalServer( int port ) {
@@ -544,21 +505,22 @@ public class CallActivity extends Activity {
 
         @Override
         public void onOpen(WebSocket conn, ClientHandshake handshake) {
-            Logger.d("SignalServer onOpen()");
-
-            mState = "joined_conn";
+            Logger.d("=== SignalServer onOpen()");
+            printInfoOnScreen("onOpen有客户端连接上...调用start call");
             //调用call， 进行媒体协商
-            doStartCall(); //
+            doStartCall(conn);
         }
 
         @Override
         public void onClose(WebSocket conn, int code, String reason, boolean remote) {
-            Logger.d("SignalServer onClose() reason="+reason+", remote="+remote);
+            Logger.d("=== SignalServer onClose() reason="+reason+", remote="+remote);
+            printInfoOnScreen("onClose客户端断开...调用doLeave，reason="+reason);
+            doLeave();
         }
 
         @Override
         public void onMessage(WebSocket conn, String message) {
-            Logger.d("SignalServer onMessage() message="+message);
+            Logger.d("=== SignalServer onMessage() message="+message);
             try {
                 JSONObject jsonMessage = new JSONObject(message);
 
@@ -580,17 +542,16 @@ public class CallActivity extends Activity {
         @Override
         public void onError(WebSocket conn, Exception ex) {
             ex.printStackTrace();
-            Logger.d("SignalServer onMessage() ex="+ex.getMessage());
+            Logger.e("=== SignalServer onMessage() ex="+ex.getMessage());
         }
 
         @Override
         public void onStart() {
-            Logger.d("SignalServer onStart()");
+            Logger.d("=== SignalServer onStart()");
             setConnectionLostTimeout(0);
             setConnectionLostTimeout(100);
 
-            logcatOnUI("服务端建立成功...创建PC");
-            mState = "joined";
+            printInfoOnScreen("onStart服务端建立成功...创建PC");
             //这里应该创建PeerConnection
             if (mPeerConnection == null) {
                 mPeerConnection = createPeerConnection();
@@ -606,21 +567,17 @@ public class CallActivity extends Activity {
 
         @Override
         public void onOpen(ServerHandshake handshakedata) {
-            Logger.d("SignalClient onOpen()");
-            logcatOnUI("连接客户端成功...创建PC");
-            mState = "joined";
+            Logger.d("=== SignalClient onOpen()");
+            printInfoOnScreen("连接服务端成功...创建PC");
             //这里应该创建PeerConnection
             if (mPeerConnection == null) {
                 mPeerConnection = createPeerConnection();
             }
-
-            mState = "joined_conn";
-
         }
 
         @Override
         public void onMessage(final String message) {
-            Logger.d("SignalClient onMessage(): message="+message);
+            Logger.d("=== SignalClient onMessage(): message="+message);
             try {
                 JSONObject jsonMessage = new JSONObject(message);
 
@@ -641,20 +598,21 @@ public class CallActivity extends Activity {
 
         @Override
         public void onClose(int code, String reason, boolean remote) {
-            Logger.d("SignalClient onClose(): reason="+reason+", remote="+remote);
+            Logger.d("=== SignalClient onClose(): reason="+reason+", remote="+remote);
+            printInfoOnScreen("和服务端断开...调用doLeave");
+            doLeave();
         }
 
         @Override
         public void onError(Exception ex) {
             ex.printStackTrace();
-            Logger.d("SignalClient onMessage() ex="+ex.getMessage());
+            Logger.d("=== SignalClient onMessage() ex="+ex.getMessage());
         }
     }
 
-
     // 接听方，收到offer
     private void onRemoteOfferReceived(JSONObject message) {
-        logcatOnUI("Receive Remote Call ...");
+        printInfoOnScreen("Receive Remote Call ...");
 
         if (mPeerConnection == null) {
             mPeerConnection = createPeerConnection();
@@ -667,14 +625,16 @@ public class CallActivity extends Activity {
                     new SessionDescription(
                             SessionDescription.Type.OFFER,
                             description));
+            printInfoOnScreen("收到offer...调用doAnswerCall");
             doAnswerCall();
         } catch (JSONException e) {
             e.printStackTrace();
         }
     }
+
     // 发送方，收到answer
     private void onRemoteAnswerReceived(JSONObject message) {
-        logcatOnUI("Receive Remote Answer ...");
+        printInfoOnScreen("Receive Remote Answer ...");
         try {
             String description = message.getString("sdp");
             mPeerConnection.setRemoteDescription(
@@ -685,11 +645,13 @@ public class CallActivity extends Activity {
         } catch (JSONException e) {
             e.printStackTrace();
         }
+        printInfoOnScreen("收到answer.....");
         updateCallState(false);
     }
+
     // 收到对端发过来的candidate
     private void onRemoteCandidateReceived(JSONObject message) {
-        logcatOnUI("Receive Remote Candidate ...");
+        printInfoOnScreen("Receive Remote Candidate ...");
         try {
             // candidate 候选者描述信息
             // sdpMid 与候选者相关的媒体流的识别标签
@@ -700,6 +662,7 @@ public class CallActivity extends Activity {
                             message.getInt("label"),
                             message.getString("candidate"));
 
+            printInfoOnScreen("收到Candidate.....");
             mPeerConnection.addIceCandidate(remoteIceCandidate);
         } catch (JSONException e) {
             e.printStackTrace();
@@ -707,12 +670,11 @@ public class CallActivity extends Activity {
     }
 
     private void onRemoteHangup() {
-        logcatOnUI("Receive Remote Hangup Event ...");
-        hangup();
+        printInfoOnScreen("Receive Remote Hangup Event ...");
+        doLeave();
     }
 
-
-    private void logcatOnUI(String msg) {
+    private void printInfoOnScreen(String msg) {
         Logger.d(msg);
         runOnUiThread(new Runnable() {
             @Override
@@ -723,17 +685,5 @@ public class CallActivity extends Activity {
         });
     }
 
-    private final TrustManager[] trustAllCerts= new TrustManager[] { new X509TrustManager() {
-        public java.security.cert.X509Certificate[] getAcceptedIssuers() {
-            return new java.security.cert.X509Certificate[] {};
-        }
 
-        public void checkClientTrusted(X509Certificate[] chain,
-                                       String authType) throws CertificateException {
-        }
-
-        public void checkServerTrusted(X509Certificate[] chain,
-                                       String authType) throws CertificateException {
-        }
-    } };
 }
